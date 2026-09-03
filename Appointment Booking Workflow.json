@@ -1,0 +1,189 @@
+{
+  "name": "Booking System - Appointment Handler", 
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "booking-tool",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "booking-webhook",
+      "name": "Booking Tool Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are an appointment booking assistant. Based on the user request, determine what action to take:\n\nAvailable actions:\n- check_availability: Check free time slots\n- book_appointment: Create a new appointment \n- cancel_appointment: Cancel existing appointment\n- reschedule_appointment: Move appointment to new time\n\nUser request: {{ $json.message }}\nCustomer info: {{ $json.customer_info }}\nRequested date/time: {{ $json.requested_datetime }}",
+        "options": {
+          "systemMessage": "You are a helpful booking assistant. Always respond with structured JSON containing: {\"action\": \"action_type\", \"datetime\": \"ISO_datetime\", \"customer_name\": \"name\", \"reason\": \"appointment_reason\"}"
+        }
+      },
+      "id": "ai-agent-booking",
+      "name": "AI Agent - Booking Logic",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.6,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-availability",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "check_availability",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "book-appointment", 
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "book_appointment",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "fallbackOutput": "extra"
+      },
+      "id": "routing-switch",
+      "name": "Route Action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "operation": "findEvents",
+        "calendarId": "{{ $vars.GOOGLE_CALENDAR_ID }}",
+        "timeMin": "={{ $json.datetime }}",
+        "timeMax": "={{ DateTime.fromISO($json.datetime).plus({hours: 8}).toISO() }}",
+        "options": {}
+      },
+      "id": "check-calendar-availability",
+      "name": "Check Calendar Availability", 
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 2,
+      "position": [900, 200],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "google-calendar-main",
+          "name": "Google Calendar"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "calendarId": "{{ $vars.GOOGLE_CALENDAR_ID }}", 
+        "start": "={{ $json.datetime }}",
+        "end": "={{ DateTime.fromISO($json.datetime).plus({hours: 1}).toISO() }}",
+        "summary": "=Appointment - {{ $json.customer_name }}",
+        "description": "=Reason: {{ $json.reason }}\\nBooked via AI Voice Assistant\\nCustomer: {{ $json.customer_name }}",
+        "options": {}
+      },
+      "id": "create-calendar-event",
+      "name": "Create Calendar Event",
+      "type": "n8n-nodes-base.googleCalendar", 
+      "typeVersion": 2,
+      "position": [900, 400],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "google-calendar-main",
+          "name": "Google Calendar"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"action\": \"{{ $json.action }}\",\n  \"message\": \"{{ $json.action === 'check_availability' ? 'Available slots found: ' + $('Check Calendar Availability').itemMatching(0).json.length : 'Appointment booked successfully for ' + $json.customer_name }}\",\n  \"data\": {{ $json.action === 'check_availability' ? $('Check Calendar Availability').item(0).json : $('Create Calendar Event').item(0).json }}\n}",
+        "options": {}
+      },
+      "id": "booking-response",
+      "name": "Booking Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1120, 300]
+    }
+  ],
+  "connections": {
+    "Booking Tool Webhook": {
+      "main": [
+        [
+          {
+            "node": "AI Agent - Booking Logic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent - Booking Logic": {
+      "main": [
+        [
+          {
+            "node": "Route Action",
+            "type": "main", 
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Action": {
+      "main": [
+        [
+          {
+            "node": "Check Calendar Availability",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Calendar Event",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Check Calendar Availability": {
+      "main": [
+        [
+          {
+            "node": "Booking Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Calendar Event": {
+      "main": [
+        [
+          {
+            "node": "Booking Response", 
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

@@ -1,0 +1,141 @@
+{
+  "name": "Voice Gateway - Main Call Handler",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "voice-gateway",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Twilio Voice Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "caller_id",
+              "value": "={{ $json.From }}"
+            },
+            {
+              "name": "call_sid", 
+              "value": "={{ $json.CallSid }}"
+            },
+            {
+              "name": "call_status",
+              "value": "={{ $json.CallStatus }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "extract-call-data",
+      "name": "Extract Call Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "operation": "createConversation",
+        "agentId": "{{ $vars.ELEVENLABS_AGENT_ID }}",
+        "additionalParameters": {
+          "customLlmExtraBody": {
+            "customer_context": "={{ $json.caller_id }}"
+          }
+        }
+      },
+      "id": "elevenlabs-create-conversation", 
+      "name": "Create ElevenLabs Conversation",
+      "type": "n8n-nodes-base.elevenlabs",
+      "typeVersion": 1,
+      "position": [680, 300],
+      "credentials": {
+        "elevenlabsApi": {
+          "id": "elevenlabs-main",
+          "name": "ElevenLabs API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Response>\n  <Connect>\n    <Stream url=\"wss://api.elevenlabs.io/v1/convai/conversation/{{ $('Create ElevenLabs Conversation').item(0).json.conversation_id }}/ws\" />\n  </Connect>\n</Response>",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/xml"
+              }
+            ]
+          }
+        }
+      },
+      "id": "respond-to-twilio",
+      "name": "Respond to Twilio",
+      "type": "n8n-nodes-base.respondToWebhook", 
+      "typeVersion": 1,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $vars.N8N_WEBHOOK_BASE_URL }}/webhook/log-call-start",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"call_sid\": \"{{ $json.call_sid }}\",\n  \"caller_id\": \"{{ $json.caller_id }}\", \n  \"conversation_id\": \"{{ $('Create ElevenLabs Conversation').item(0).json.conversation_id }}\",\n  \"timestamp\": \"{{ $now.toISO() }}\"\n}",
+        "options": {}
+      },
+      "id": "log-call-start",
+      "name": "Log Call Start", 
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [680, 480]
+    }
+  ],
+  "connections": {
+    "Twilio Voice Webhook": {
+      "main": [
+        [
+          {
+            "node": "Extract Call Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Call Data": {
+      "main": [
+        [
+          {
+            "node": "Create ElevenLabs Conversation", 
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log Call Start",
+            "type": "main", 
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create ElevenLabs Conversation": {
+      "main": [
+        [
+          {
+            "node": "Respond to Twilio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

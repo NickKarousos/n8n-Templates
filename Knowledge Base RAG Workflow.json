@@ -1,0 +1,138 @@
+{
+  "name": "Knowledge Base - FAQ Handler",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "knowledge-tool",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "knowledge-webhook",
+      "name": "Knowledge Tool Webhook", 
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "model": "text-embedding-3-small",
+        "inputType": "query",
+        "input": "={{ $json.query }}",
+        "options": {}
+      },
+      "id": "create-query-embedding",
+      "name": "Create Query Embedding",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1,
+      "position": [460, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-main",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "retrieve",
+        "collectionName": "={{ $vars.QDRANT_COLLECTION_NAME }}",
+        "topK": 5,
+        "queryEmbedding": "={{ $json.embedding }}",
+        "options": {
+          "metadata": {
+            "metadataValues": [
+              {
+                "name": "customer_id",
+                "value": "={{ $('Knowledge Tool Webhook').item(0).json.customer_id }}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "search-knowledge-base",
+      "name": "Search Knowledge Base",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreQdrant",
+      "typeVersion": 1,
+      "position": [680, 300],
+      "credentials": {
+        "qdrantApi": {
+          "id": "qdrant-main",
+          "name": "Qdrant API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Based on the following knowledge base context, answer the user's question accurately and helpfully.\n\nContext:\n{{ $('Search Knowledge Base').all().map(item => item.json.pageContent).join('\\n\\n') }}\n\nQuestion: {{ $('Knowledge Tool Webhook').item(0).json.query }}\n\nProvide a helpful answer based only on the context provided. If the context doesn't contain enough information, say so politely.",
+        "options": {
+          "systemMessage": "You are a helpful customer service representative. Provide accurate information based on the company's knowledge base. Be concise but thorough."
+        }
+      },
+      "id": "ai-agent-answer",
+      "name": "AI Agent - Generate Answer",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.6,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"query\": \"{{ $('Knowledge Tool Webhook').item(0).json.query }}\",\n  \"answer\": \"{{ $json.output }}\",\n  \"sources_found\": {{ $('Search Knowledge Base').all().length }},\n  \"timestamp\": \"{{ $now.toISO() }}\"\n}",
+        "options": {}
+      },
+      "id": "knowledge-response",
+      "name": "Knowledge Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1120, 300]
+    }
+  ],
+  "connections": {
+    "Knowledge Tool Webhook": {
+      "main": [
+        [
+          {
+            "node": "Create Query Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Query Embedding": {
+      "main": [
+        [
+          {
+            "node": "Search Knowledge Base",
+            "type": "main", 
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Knowledge Base": {
+      "main": [
+        [
+          {
+            "node": "AI Agent - Generate Answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent - Generate Answer": {
+      "main": [
+        [
+          {
+            "node": "Knowledge Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

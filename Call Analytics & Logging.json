@@ -1,0 +1,166 @@
+{
+  "name": "Call Analytics - Logging & Reporting",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "log-call-start",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "log-call-webhook",
+      "name": "Log Call Start Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": "{{ $vars.GOOGLE_SHEETS_ID }}",
+        "sheetName": "call_logs",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "call_sid": "={{ $json.call_sid }}",
+            "caller_id": "={{ $json.caller_id }}",
+            "conversation_id": "={{ $json.conversation_id }}",
+            "call_start": "={{ $json.timestamp }}",
+            "status": "started"
+          }
+        },
+        "options": {}
+      },
+      "id": "log-to-sheets",
+      "name": "Log to Google Sheets", 
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.2,
+      "position": [460, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "google-sheets-main",
+          "name": "Google Sheets"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"message\": \"Call logged successfully\",\n  \"call_sid\": \"{{ $json.call_sid }}\"\n}",
+        "options": {}
+      },
+      "id": "logging-response",
+      "name": "Logging Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "log-call-end", 
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "call-end-webhook",
+      "name": "Call End Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 600]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Analyze this call transcript and provide insights:\n\nTranscript: {{ $json.transcript }}\nCall Duration: {{ $json.duration }} seconds\nCustomer Phone: {{ $json.caller_id }}\n\nProvide:\n1. Sentiment (positive/neutral/negative)\n2. Intent classification (booking, info_request, complaint, other)\n3. Key topics mentioned\n4. Action items or follow-ups needed\n5. Customer satisfaction level (1-5)\n\nRespond in JSON format.",
+        "options": {
+          "systemMessage": "You are a call analysis expert. Analyze customer service calls and provide structured insights in JSON format."
+        }
+      },
+      "id": "ai-call-analysis",
+      "name": "AI Call Analysis", 
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.6,
+      "position": [460, 600]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": "{{ $vars.GOOGLE_SHEETS_ID }}",
+        "sheetName": "call_logs",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "call_end": "={{ $('Call End Webhook').item(0).json.timestamp }}",
+            "duration_seconds": "={{ $('Call End Webhook').item(0).json.duration }}",
+            "transcript": "={{ $('Call End Webhook').item(0).json.transcript }}",
+            "sentiment": "={{ $json.sentiment }}",
+            "intent": "={{ $json.intent }}",
+            "satisfaction_score": "={{ $json.customer_satisfaction_level }}",
+            "status": "completed"
+          }
+        },
+        "options": {
+          "lookupColumn": "call_sid",
+          "lookupValue": "={{ $('Call End Webhook').item(0).json.call_sid }}"
+        }
+      },
+      "id": "update-call-log",
+      "name": "Update Call Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.2,
+      "position": [680, 600],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "google-sheets-main", 
+          "name": "Google Sheets"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Log Call Start Webhook": {
+      "main": [
+        [
+          {
+            "node": "Log to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log to Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Logging Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call End Webhook": {
+      "main": [
+        [
+          {
+            "node": "AI Call Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Call Analysis": {
+      "main": [
+        [
+          {
+            "node": "Update Call Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

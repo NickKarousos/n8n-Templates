@@ -1,0 +1,315 @@
+{
+  "name": "Knowledge Base Updater - Web Scraper",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 2 * * *"
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Daily Scraping Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $vars.CUSTOMER_WEBSITE }}/sitemap.xml",
+        "options": {}
+      },
+      "id": "fetch-sitemap",
+      "name": "Fetch Sitemap",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "mode": "xml",
+        "property": "data",
+        "options": {}
+      },
+      "id": "parse-sitemap-xml",
+      "name": "Parse Sitemap XML",
+      "type": "n8n-nodes-base.xml", 
+      "typeVersion": 1,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "urlset.url",
+        "options": {}
+      },
+      "id": "split-urls",
+      "name": "Split URLs",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $vars.CRAWL4AI_ENDPOINT }}/crawl",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"urls\": [\"{{ $json.loc }}\"],\n  \"extraction_config\": {\n    \"type\": \"markdown\",\n    \"params\": {\n      \"heading_tags\": [\"h1\", \"h2\", \"h3\"],\n      \"remove_forms\": true\n    }\n  },\n  \"crawl_config\": {\n    \"respect_robots\": true,\n    \"delay\": 2\n  }\n}",
+        "options": {
+          "headers": {
+            "entries": [
+              {
+                "name": "Authorization",
+                "value": "Bearer {{ $vars.CRAWL4AI_API_TOKEN }}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "scrape-with-crawl4ai",
+      "name": "Scrape with Crawl4AI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $vars.CRAWL4AI_ENDPOINT }}/task/{{ $('Scrape with Crawl4AI').item(0).json.task_id }}",
+        "options": {}
+      },
+      "id": "check-scraping-status",
+      "name": "Check Scraping Status",
+      "type": "n8n-nodes-base.httpRequest", 
+      "typeVersion": 4.1,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "task-completed",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "completed",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "fallbackOutput": "extra"
+      },
+      "id": "check-completion-status",
+      "name": "Check Completion Status",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [1560, 300]
+    },
+    {
+      "parameters": {
+        "amount": 5,
+        "unit": "seconds"
+      },
+      "id": "wait-for-completion",
+      "name": "Wait for Completion",
+      "type": "n8n-nodes-base.wait", 
+      "typeVersion": 1.1,
+      "position": [1560, 500]
+    },
+    {
+      "parameters": {
+        "chunkSize": 1000,
+        "chunkOverlap": 200,
+        "options": {}
+      },
+      "id": "text-splitter",
+      "name": "Split Text into Chunks",
+      "type": "@n8n/n8n-nodes-langchain.textSplitterRecursiveCharacterTextSplitter",
+      "typeVersion": 1,
+      "position": [1780, 200]
+    },
+    {
+      "parameters": {
+        "model": "text-embedding-3-small", 
+        "inputType": "document",
+        "input": "={{ $json.pageContent }}",
+        "options": {}
+      },
+      "id": "create-embeddings",
+      "name": "Create Embeddings",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1,
+      "position": [2000, 200],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-main",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "collectionName": "={{ $vars.QDRANT_COLLECTION_NAME }}",
+        "options": {
+          "metadata": {
+            "metadataValues": [
+              {
+                "name": "source_url",
+                "value": "={{ $('Split URLs').item(0).json.loc }}"
+              },
+              {
+                "name": "customer_id", 
+                "value": "={{ $vars.CUSTOMER_ID }}"
+              },
+              {
+                "name": "scraped_at",
+                "value": "={{ $now.toISO() }}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "store-in-qdrant",
+      "name": "Store in Qdrant",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreQdrant",
+      "typeVersion": 1,
+      "position": [2220, 200],
+      "credentials": {
+        "qdrantApi": {
+          "id": "qdrant-main", 
+          "name": "Qdrant API"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Daily Scraping Schedule": {
+      "main": [
+        [
+          {
+            "node": "Fetch Sitemap",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Sitemap": {
+      "main": [
+        [
+          {
+            "node": "Parse Sitemap XML",
+            "type": "main", 
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Sitemap XML": {
+      "main": [
+        [
+          {
+            "node": "Split URLs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split URLs": {
+      "main": [
+        [
+          {
+            "node": "Scrape with Crawl4AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scrape with Crawl4AI": {
+      "main": [
+        [
+          {
+            "node": "Check Scraping Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Scraping Status": {
+      "main": [
+        [
+          {
+            "node": "Check Completion Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Completion Status": {
+      "main": [
+        [
+          {
+            "node": "Split Text into Chunks",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait for Completion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Completion": {
+      "main": [
+        [
+          {
+            "node": "Check Scraping Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Text into Chunks": {
+      "main": [
+        [
+          {
+            "node": "Create Embeddings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Embeddings": {
+      "main": [
+        [
+          {
+            "node": "Store in Qdrant",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
